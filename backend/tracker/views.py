@@ -11,6 +11,7 @@ from .serializers import (
     UserSerializer, RegisterSerializer, VaccinationSerializer, 
     HealthRecordSerializer, HealthCampSerializer, NotificationSerializer, CampRegistrationSerializer
 )
+from .emails import send_portal_registration_email, send_camp_registration_email
 
 # Custom Permissions
 class IsAdminUserRole(permissions.BasePermission):
@@ -24,6 +25,23 @@ class IsHealthWorkerUserRole(permissions.BasePermission):
 class IsCitizenUserRole(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated and request.user.role == 'citizen'
+
+class IsAdminOrHealthWorkerForCitizens(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.role == 'admin':
+            return True
+        if request.user.role == 'health_worker':
+            return view.action in ['list', 'retrieve', 'update', 'partial_update', 'create']
+        return False
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.role == 'admin':
+            return True
+        if request.user.role == 'health_worker':
+            return obj.role == 'citizen' and (obj.created_by is None or obj.created_by == request.user)
+        return False
 
 # Custom JWT Authentication Views
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -58,6 +76,9 @@ class RegisterView(generics.CreateAPIView):
                 defaults={'blood_group': 'Not Specified', 'allergies': '', 'medical_history': '', 'dob': None, 'gender': ''}
             )
 
+        # Send welcome email notification
+        send_portal_registration_email(user)
+
         return Response(
             {
                 "user": {
@@ -85,7 +106,13 @@ class CitizenListView(generics.ListAPIView):
     serializer_class = UserSerializer
 
     def get_queryset(self):
-        return CustomUser.objects.filter(role='citizen').order_by('name')
+        user = self.request.user
+        if user.role == 'admin':
+            return CustomUser.objects.filter(role='citizen').order_by('name')
+        # Health workers see public citizens (created_by is null) + private citizens created by themselves
+        return CustomUser.objects.filter(
+            models.Q(role='citizen') & (models.Q(created_by__isnull=True) | models.Q(created_by=user))
+        ).order_by('name')
 
 # Vaccination ViewSet
 class VaccinationViewSet(viewsets.ModelViewSet):
@@ -96,8 +123,12 @@ class VaccinationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role == 'citizen':
             return Vaccination.objects.filter(user=user).order_by('due_date')
-        # Health Workers and Admins see all
-        return Vaccination.objects.all().order_by('due_date')
+        if user.role == 'admin':
+            return Vaccination.objects.all().order_by('due_date')
+        # Health Workers see vaccinations for public citizens + private citizens created by themselves
+        return Vaccination.objects.filter(
+            models.Q(user__created_by__isnull=True) | models.Q(user__created_by=user)
+        ).order_by('due_date')
 
     def perform_create(self, serializer):
         # Health Worker / Admin adds a record
@@ -134,8 +165,12 @@ class HealthRecordViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role == 'citizen':
             return HealthRecord.objects.filter(user=user)
-        # Health Workers / Admins see all
-        return HealthRecord.objects.all()
+        if user.role == 'admin':
+            return HealthRecord.objects.all()
+        # Health Workers see records for public citizens + private citizens created by themselves
+        return HealthRecord.objects.filter(
+            models.Q(user__created_by__isnull=True) | models.Q(user__created_by=user)
+        )
 
     def get_object(self):
         # Special support for citizens fetching their own record using 'me' or ID
@@ -146,7 +181,12 @@ class HealthRecordViewSet(viewsets.ModelViewSet):
                 defaults={'blood_group': 'Not Specified', 'allergies': '', 'medical_history': '', 'dob': None, 'gender': ''}
             )
             return obj
-        return super().get_object()
+        obj = super().get_object()
+        # Check permissions for health workers
+        if self.request.user.role == 'health_worker':
+            if obj.user.created_by and obj.user.created_by != self.request.user:
+                raise permissions.exceptions.PermissionDenied("You do not have access to this patient record.")
+        return obj
 
     def perform_update(self, serializer):
         # Users can update their own record, workers/admins can update any
@@ -234,11 +274,49 @@ class AdminStatsView(APIView):
             "users": users_data
         })
 
-# User ViewSet (For Admins)
+# User ViewSet (For Admins & Health Workers acting on Citizens)
 class UserViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAdminOrHealthWorkerForCitizens]
     serializer_class = UserSerializer
-    queryset = CustomUser.objects.all().order_by('role', 'name')
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return CustomUser.objects.all().order_by('role', 'name')
+        # Health Workers can only see public citizens + private citizens created by themselves
+        return CustomUser.objects.filter(
+            models.Q(role='citizen') & (models.Q(created_by__isnull=True) | models.Q(created_by=user))
+        ).order_by('name')
+
+    def perform_create(self, serializer):
+        if self.request.user.role == 'health_worker':
+            # Create a private citizen user with unusable password
+            user = serializer.save(
+                role='citizen', 
+                created_by=self.request.user,
+                username=serializer.validated_data.get('email')
+            )
+            user.set_unusable_password()
+            user.save()
+            
+            # Auto-create HealthRecord
+            HealthRecord.objects.get_or_create(
+                user=user,
+                defaults={'blood_group': 'Not Specified', 'allergies': '', 'medical_history': '', 'dob': None, 'gender': ''}
+            )
+        else:
+            # Admin flow
+            user = serializer.save(username=serializer.validated_data.get('email'))
+            user.set_unusable_password()
+            user.save()
+            if user.role == 'citizen':
+                HealthRecord.objects.get_or_create(
+                    user=user,
+                    defaults={'blood_group': 'Not Specified', 'allergies': '', 'medical_history': '', 'dob': None, 'gender': ''}
+                )
+        
+        # Send portal registration email
+        send_portal_registration_email(user)
 
 # CampRegistration ViewSet
 class CampRegistrationViewSet(viewsets.ModelViewSet):
@@ -262,6 +340,10 @@ class CampRegistrationViewSet(viewsets.ModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Only citizens can be registered for health camps.")
             
-        serializer.save(user=target_user)
+        camp_reg = serializer.save(user=target_user)
+        
+        # Send camp registration email notification
+        send_camp_registration_email(target_user, camp_reg.camp, registered_by=user)
+
 
 

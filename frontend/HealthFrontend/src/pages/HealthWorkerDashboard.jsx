@@ -44,6 +44,24 @@ const HealthWorkerDashboard = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
+  // Custom private patient registration states
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isEditingBasic, setIsEditingBasic] = useState(false);
+  const [basicInfo, setBasicInfo] = useState({ name: '', email: '' });
+  const [newPatient, setNewPatient] = useState({
+    name: '',
+    email: '',
+    blood_group: 'Not Specified',
+    dob: '',
+    gender: '',
+    allergies: '',
+    medical_history: '',
+    vaccine_name: '',
+    due_date: '',
+    status: 'pending',
+    administered_date: ''
+  });
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -74,6 +92,9 @@ const HealthWorkerDashboard = () => {
 
   const handleSelectCitizen = async (citizen) => {
     setSelectedCitizen(citizen);
+    setIsRegistering(false);
+    setIsEditingBasic(false);
+    setBasicInfo({ name: citizen.name || '', email: citizen.email || '' });
     try {
       setActionLoading(true);
       const res = await api.get('health-records/');
@@ -101,6 +122,122 @@ const HealthWorkerDashboard = () => {
     } catch (e) {
       console.error(e);
       showMsg('danger', 'Failed to retrieve patient health card.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleStartRegisterPatient = () => {
+    setSelectedCitizen(null);
+    setIsRegistering(true);
+    setIsEditingBasic(false);
+  };
+
+  const handleSaveBasicInfo = async () => {
+    if (!basicInfo.name || !basicInfo.email) {
+      showMsg('danger', 'Name and email are required.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await api.patch(`users/${selectedCitizen.id}/`, {
+        name: basicInfo.name,
+        email: basicInfo.email
+      });
+      setSelectedCitizen(res.data);
+      setCitizens(prev => prev.map(c => c.id === selectedCitizen.id ? res.data : c));
+      setIsEditingBasic(false);
+      showMsg('success', 'Patient basic details updated successfully.');
+    } catch (err) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.email) {
+        showMsg('danger', `Failed to save: ${err.response.data.email[0]}`);
+      } else {
+        showMsg('danger', 'Failed to update patient profile info.');
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRegisterPatientSubmit = async (e) => {
+    e.preventDefault();
+    if (!newPatient.name || !newPatient.email) {
+      showMsg('danger', 'Name and email are required.');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      // 1. Create Patient User with unusable password
+      const userRes = await api.post('users/', {
+        name: newPatient.name,
+        email: newPatient.email,
+        role: 'citizen'
+      });
+      const createdUser = userRes.data;
+
+      // 2. Fetch the newly created user's health record and update it
+      const recordsRes = await api.get('health-records/');
+      const matchingRecord = recordsRes.data.find(r => r.user === createdUser.id);
+      
+      if (matchingRecord) {
+        await api.put(`health-records/${matchingRecord.id}/`, {
+          user: createdUser.id,
+          blood_group: newPatient.blood_group,
+          dob: newPatient.dob || null,
+          gender: newPatient.gender,
+          allergies: newPatient.allergies,
+          medical_history: newPatient.medical_history
+        });
+      }
+
+      // 3. Create initial vaccination if provided
+      if (newPatient.vaccine_name) {
+        const vacPayload = {
+          user: createdUser.id,
+          vaccine_name: newPatient.vaccine_name,
+          due_date: newPatient.due_date || new Date().toISOString().split('T')[0],
+          status: newPatient.status,
+          administered_date: newPatient.status === 'completed' ? (newPatient.administered_date || new Date().toISOString().split('T')[0]) : null
+        };
+        await api.post('vaccinations/', vacPayload);
+      }
+
+      showMsg('success', `Patient '${newPatient.name}' created and configured successfully.`);
+      setIsRegistering(false);
+      
+      // Reset form
+      setNewPatient({
+        name: '',
+        email: '',
+        blood_group: 'Not Specified',
+        dob: '',
+        gender: '',
+        allergies: '',
+        medical_history: '',
+        vaccine_name: '',
+        due_date: '',
+        status: 'pending',
+        administered_date: ''
+      });
+
+      // Reload registry data and auto-select
+      const [citizensRes, vacsRes] = await Promise.all([
+        api.get('citizens/'),
+        api.get('vaccinations/')
+      ]);
+      setCitizens(citizensRes.data);
+      setAllVaccinations(vacsRes.data);
+      
+      handleSelectCitizen(createdUser);
+    } catch (err) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.email) {
+        showMsg('danger', `Failed to create patient: ${err.response.data.email[0]}`);
+      } else {
+        showMsg('danger', 'Failed to register patient profile.');
+      }
     } finally {
       setActionLoading(false);
     }
@@ -260,7 +397,15 @@ const HealthWorkerDashboard = () => {
           {/* Citizens List Column */}
           <div className="col-lg-4">
             <div className="card p-4 border-0 shadow-sm h-100">
-              <h3 className="h5 fw-bold mb-3">Citizens Registry</h3>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h3 className="h5 fw-bold mb-0">Citizens Registry</h3>
+                <button 
+                  className="btn btn-xs btn-gradient px-2 py-1"
+                  onClick={handleStartRegisterPatient}
+                >
+                  <i className="bi bi-person-plus-fill me-1"></i>Add Patient
+                </button>
+              </div>
               
               <div className="input-group mb-3">
                 <span className="input-group-text bg-light"><i className="bi bi-search text-muted"></i></span>
@@ -297,18 +442,245 @@ const HealthWorkerDashboard = () => {
 
           {/* Citizen Details Column */}
           <div className="col-lg-8">
-            {selectedCitizen ? (
+            {isRegistering ? (
+              <div className="card p-4 border-0 shadow-sm">
+                <div className="d-flex justify-content-between align-items-center mb-4 border-bottom pb-2">
+                  <h3 className="h5 fw-bold mb-0 text-primary">
+                    <i className="bi bi-person-plus-fill me-2"></i>Add New Patient Profile
+                  </h3>
+                  <button 
+                    type="button" 
+                    className="btn btn-sm btn-outline-secondary px-3" 
+                    onClick={() => setIsRegistering(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                
+                <form onSubmit={handleRegisterPatientSubmit}>
+                  {/* Section 1: Basic Info */}
+                  <h5 className="fw-bold mb-3 text-secondary border-bottom pb-1" style={{ fontSize: '0.9rem' }}>
+                    1. Account Information
+                  </h5>
+                  <div className="row g-3 mb-4">
+                    <div className="col-md-6">
+                      <label className="form-label small fw-semibold">Patient Name</label>
+                      <input 
+                        type="text" 
+                        className="form-control form-control-sm"
+                        placeholder="e.g. John Doe"
+                        value={newPatient.name}
+                        onChange={(e) => setNewPatient({...newPatient, name: e.target.value})}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label small fw-semibold">Email Address</label>
+                      <input 
+                        type="email" 
+                        className="form-control form-control-sm"
+                        placeholder="e.g. john@example.com"
+                        value={newPatient.email}
+                        onChange={(e) => setNewPatient({...newPatient, email: e.target.value})}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Section 2: Medical Report */}
+                  <h5 className="fw-bold mb-3 text-secondary border-bottom pb-1" style={{ fontSize: '0.9rem' }}>
+                    2. Medical Report (Health Record)
+                  </h5>
+                  <div className="row g-3 mb-4">
+                    <div className="col-md-4">
+                      <label className="form-label small fw-semibold">Blood Group</label>
+                      <select 
+                        className="form-select form-select-sm"
+                        value={newPatient.blood_group}
+                        onChange={(e) => setNewPatient({...newPatient, blood_group: e.target.value})}
+                      >
+                        <option value="Not Specified">Select Blood Group</option>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                      </select>
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label small fw-semibold">Date of Birth</label>
+                      <input 
+                        type="date" 
+                        className="form-control form-control-sm"
+                        value={newPatient.dob}
+                        onChange={(e) => setNewPatient({...newPatient, dob: e.target.value})}
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label small fw-semibold">Gender</label>
+                      <select 
+                        className="form-select form-select-sm"
+                        value={newPatient.gender}
+                        onChange={(e) => setNewPatient({...newPatient, gender: e.target.value})}
+                      >
+                        <option value="">Select Gender</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                        <option value="prefer_not_to_say">Prefer not to say</option>
+                      </select>
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label small fw-semibold">Allergies</label>
+                      <input 
+                        type="text" 
+                        className="form-control form-control-sm"
+                        placeholder="List any medical allergies (optional)"
+                        value={newPatient.allergies}
+                        onChange={(e) => setNewPatient({...newPatient, allergies: e.target.value})}
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label small fw-semibold">Medical History</label>
+                      <textarea 
+                        className="form-control form-control-sm"
+                        rows="2"
+                        placeholder="List pre-existing conditions, chronic diseases, or surgeries (optional)"
+                        value={newPatient.medical_history}
+                        onChange={(e) => setNewPatient({...newPatient, medical_history: e.target.value})}
+                      ></textarea>
+                    </div>
+                  </div>
+
+                  {/* Section 3: Initial Vaccination (Optional) */}
+                  <h5 className="fw-bold mb-3 text-secondary border-bottom pb-1" style={{ fontSize: '0.9rem' }}>
+                    3. Initial Vaccination (Optional)
+                  </h5>
+                  <div className="row g-3 mb-4">
+                    <div className="col-md-4">
+                      <label className="form-label small fw-semibold">Vaccine Name</label>
+                      <input 
+                        type="text" 
+                        className="form-control form-control-sm"
+                        placeholder="e.g. Covid-19, BCG"
+                        value={newPatient.vaccine_name}
+                        onChange={(e) => setNewPatient({...newPatient, vaccine_name: e.target.value})}
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label small fw-semibold">Due Date</label>
+                      <input 
+                        type="date" 
+                        className="form-control form-control-sm"
+                        value={newPatient.due_date}
+                        onChange={(e) => setNewPatient({...newPatient, due_date: e.target.value})}
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label small fw-semibold">Status</label>
+                      <select 
+                        className="form-select form-select-sm"
+                        value={newPatient.status}
+                        onChange={(e) => setNewPatient({...newPatient, status: e.target.value})}
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
+                    {newPatient.status === 'completed' && (
+                      <div className="col-md-4">
+                        <label className="form-label small fw-semibold">Administered Date</label>
+                        <input 
+                          type="date" 
+                          className="form-control form-control-sm"
+                          value={newPatient.administered_date}
+                          onChange={(e) => setNewPatient({...newPatient, administered_date: e.target.value})}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-end">
+                    <button 
+                      type="submit" 
+                      className="btn btn-sm btn-gradient px-4" 
+                      disabled={actionLoading}
+                    >
+                      {actionLoading ? 'Creating Patient...' : 'Register Patient'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : selectedCitizen ? (
               <div className="d-flex flex-column gap-4">
                 {/* Profile Overview */}
-                <div className="card p-4 border-0 shadow-sm glass-card">
-                  <h3 className="h5 fw-bold mb-3 border-bottom pb-2 text-primary">
-                    <i className="bi bi-person-badge-fill me-2"></i>Patient: {selectedCitizen.name}
-                  </h3>
-                  <div className="row text-secondary">
-                    <div className="col-md-6 mb-2"><strong>Email:</strong> {selectedCitizen.email}</div>
-                    <div className="col-md-6 mb-2"><strong>Role:</strong> Citizen</div>
+                {!isEditingBasic ? (
+                  <div className="card p-4 border-0 shadow-sm glass-card">
+                    <div className="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                      <h3 className="h5 fw-bold mb-0 text-primary">
+                        <i className="bi bi-person-badge-fill me-2"></i>Patient Profile
+                      </h3>
+                      <button 
+                        className="btn btn-xs btn-outline-primary px-3 py-1"
+                        onClick={() => setIsEditingBasic(true)}
+                      >
+                        <i className="bi bi-pencil-square me-1"></i>Edit Info
+                      </button>
+                    </div>
+                    <div className="row text-secondary">
+                      <div className="col-md-6 mb-2"><strong>Name:</strong> {selectedCitizen.name || 'Anonymous'}</div>
+                      <div className="col-md-6 mb-2"><strong>Email:</strong> {selectedCitizen.email}</div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="card p-4 border-0 shadow-sm glass-card">
+                    <div className="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                      <h3 className="h5 fw-bold mb-0 text-primary">
+                        <i className="bi bi-pencil-square me-2"></i>Edit Patient Info
+                      </h3>
+                      <div className="d-flex gap-2">
+                        <button 
+                          type="button" 
+                          className="btn btn-xs btn-outline-secondary px-2 py-1"
+                          onClick={() => setIsEditingBasic(false)}
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="button" 
+                          className="btn btn-xs btn-primary px-2 py-1"
+                          onClick={handleSaveBasicInfo}
+                          disabled={actionLoading}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                    <div className="row g-2">
+                      <div className="col-md-6">
+                        <label className="form-label small fw-semibold">Name</label>
+                        <input 
+                          type="text" 
+                          className="form-control form-control-sm"
+                          value={basicInfo.name}
+                          onChange={(e) => setBasicInfo({...basicInfo, name: e.target.value})}
+                        />
+                      </div>
+                      <div className="col-md-6">
+                        <label className="form-label small fw-semibold">Email</label>
+                        <input 
+                          type="email" 
+                          className="form-control form-control-sm"
+                          value={basicInfo.email}
+                          onChange={(e) => setBasicInfo({...basicInfo, email: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Edit Medical Profile */}
                 <div className="card p-4 border-0 shadow-sm">

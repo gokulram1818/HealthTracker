@@ -4,8 +4,8 @@ from .models import CustomUser, Vaccination, HealthRecord, HealthCamp, Notificat
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ['id', 'username', 'email', 'name', 'role', 'is_staff']
-        read_only_fields = ['id', 'username', 'is_staff']
+        fields = ['id', 'username', 'email', 'name', 'role', 'is_staff', 'created_by']
+        read_only_fields = ['id', 'username', 'is_staff', 'created_by']
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)

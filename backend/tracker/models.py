@@ -28,6 +28,13 @@ class CustomUser(AbstractUser):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='citizen')
     name = models.CharField(max_length=150, blank=True)
     email = models.EmailField(unique=True)
+    created_by = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='created_users'
+    )
 
     objects = CustomUserManager()
 

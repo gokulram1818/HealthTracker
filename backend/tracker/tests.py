@@ -1,8 +1,10 @@
 from django.urls import reverse
+from django.core import mail
 from rest_framework import status
 from rest_framework.test import APITestCase
 from tracker.models import CustomUser, Vaccination, HealthRecord, HealthCamp, Notification
 import datetime
+
 
 class TrackerAPITests(APITestCase):
 
@@ -249,4 +251,86 @@ class TrackerAPITests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token)
         response = self.client.delete(f'/api/camp-registrations/{reg_id}/')
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_private_patient_creation(self):
+        # 1. Health Worker A registers a private patient
+        token_a = self.get_jwt_token('worker_test@health.com', 'password123')
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token_a)
+        
+        patient_data = {
+            'name': 'Private Patient',
+            'email': 'private_patient@health.com'
+        }
+        response = self.client.post('/api/users/', patient_data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        patient_id = response.data['id']
+        
+        # Verify the created patient has unusable password (cannot log in)
+        patient_user = CustomUser.objects.get(id=patient_id)
+        self.assertFalse(patient_user.has_usable_password())
+        self.assertEqual(patient_user.created_by, self.worker_user)
+        
+        # Verify HealthRecord is auto-created
+        self.assertTrue(HealthRecord.objects.filter(user=patient_user).exists())
+        
+        # 2. Verify Health Worker B cannot see this patient
+        worker_b = CustomUser.objects.create_user(
+            email='worker_b@health.com',
+            password='password123',
+            name='Test Worker B',
+            role='health_worker'
+        )
+        token_b = self.get_jwt_token('worker_b@health.com', 'password123')
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token_b)
+        
+        # Get citizens list - should NOT include the private patient
+        response = self.client.get('/api/citizens/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Standard citizen is visible (citizen_test@health.com), but private patient should not be.
+        emails = [c['email'] for c in response.data]
+        self.assertIn('citizen_test@health.com', emails)
+        self.assertNotIn('private_patient@health.com', emails)
+        
+        # Try to retrieve the private patient directly (should be 404 since it's filtered out of queryset)
+        response = self.client.get(f'/api/users/{patient_id}/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_portal_registration_email_sent(self):
+        mail.outbox.clear()
+        data = {
+            'name': 'Mail Test User',
+            'email': 'mailtest@health.com',
+            'password': 'password123',
+            'role': 'citizen'
+        }
+        response = self.client.post(self.register_url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Verify email in outbox
+        self.assertEqual(len(mail.outbox), 1)
+        sent_email = mail.outbox[0]
+        self.assertIn('Welcome to Health Tracker', sent_email.subject)
+        self.assertEqual(sent_email.to, ['mailtest@health.com'])
+
+    def test_camp_registration_email_sent(self):
+        camp = HealthCamp.objects.create(
+            location='Central Park',
+            date='2026-07-01',
+            vaccine_type='COVID-19 Booster'
+        )
+
+        mail.outbox.clear()
+        # Admin registers citizen for camp
+        token = self.get_jwt_token('admin_test@health.com', 'password123')
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token)
+        
+        response = self.client.post('/api/camp-registrations/', {'camp': camp.id, 'user': self.citizen_user.id}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Verify email in outbox
+        self.assertEqual(len(mail.outbox), 1)
+        sent_email = mail.outbox[0]
+        self.assertIn('Health Camp Registration Confirmation', sent_email.subject)
+        self.assertEqual(sent_email.to, ['citizen_test@health.com'])
+
 

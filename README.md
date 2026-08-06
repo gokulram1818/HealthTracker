@@ -1,99 +1,94 @@
-# 🏥 HealthTracker (AuraStride Ecosystem)
-
-[![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![React Version](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb.svg)](https://reactjs.org/)
-[![Django REST Framework](https://img.shields.io/badge/backend-Django%20REST-green.svg)](https://www.django-rest-framework.org/)
-
-> **HealthTracker** is a modern, unified digital health ecosystem designed to bridge the gap between citizens, healthcare workers, and administrators. Seamlessly track vaccinations, manage health records, coordinate health camps, and deliver real-time notifications.
-
+---
+title: HealthTracker
+sdk: docker
+app_port: 7860
 ---
 
-## 🚀 Repository Overview
+# HealthTracker
 
-This repository is structured as a single monorepo housing both the backend and frontend services:
+HealthTracker is a Django REST API with a React + Vite frontend for managing citizen health records, vaccination schedules, health camps, notifications, and role-based dashboards.
 
-```
+## Tech Stack
+
+- Backend: Django, Django REST Framework, Simple JWT, SQLite
+- Frontend: React, Vite, Axios, Bootstrap
+- Deployment: Docker, Gunicorn, WhiteNoise
+
+## Project Structure
+
+```text
 HealthTracker/
-├── backend/             # Django REST API Service
-│   ├── backend/         # Main settings, URLs, and configurations
-│   ├── tracker/         # Core Django application logic (Models, Views, Serializers)
-│   ├── manage.py        # Django CLI wrapper
-│   └── seed.py          # Database seeding script
-├── frontend/            # React + Vite Client Application
-│   └── HealthFrontend/  # React source code, components, routes, and styles
-└── envi/                # Python Virtual Environment (ignored in git)
+├── backend/                 # Django API
+│   ├── backend/             # Django settings and URLs
+│   ├── tracker/             # App models, serializers, views, routes
+│   ├── manage.py
+│   └── requirements.txt
+├── frontend/HealthFrontend/ # React + Vite app
+├── Dockerfile               # Hugging Face Spaces container
+└── README.md
 ```
 
----
-
-## 🛠️ Tech Stack
+## Run Locally
 
 ### Backend
-* **Framework**: Django & Django REST Framework (DRF)
-* **Database**: SQLite3 (Development) / PostgreSQL compatible
-* **Authentication**: JWT (JSON Web Tokens) with `django-rest-framework-simplejwt`
 
-### Frontend
-* **Core**: React 18+ (Vite builder)
-* **Routing**: React Router DOM (with protected route structures)
-* **Styling**: Vanilla CSS with custom modern glassmorphic design systems
-* **API Client**: Axios configured with interceptors for JWT state handling
-
----
-
-## ✨ Features & Architecture
-
-* **🔑 Unified Authentication**: Secure login and registration with Role-Based Access Control (RBAC).
-* **👤 Citizen Dashboard**:
-  * View personal health history.
-  * Register for local health camps.
-  * Track upcoming vaccination schedules.
-* **🩺 Health Worker Portal**:
-  * Manage and update citizen health records.
-  * Schedule vaccinations and health camp tasks.
-* **📊 Admin Command Center**:
-  * Complete operational oversight of health workers, camps, and system-wide notifications.
-* **🔔 Live Notifications**: Alerts for new camp schedules, vaccine updates, and system messages.
-
----
-
-## ⚡ Quickstart Guide
-
-### 1. Prerequisite Setup
-Ensure you have **Node.js** (v18+) and **Python** (v3.10+) installed.
-
-### 2. Backend Installation (Django)
-Navigate to the backend directory:
-```bash
+```powershell
 cd backend
-```
-Set up your virtual environment & dependencies:
-```bash
-# If using the existing 'envi' environment:
 ..\envi\Scripts\activate
-
-# Install Django & other requirements
-pip install -r requirements.txt # (or install django, djangorestframework, djangorestframework-simplejwt, django-cors-headers)
-```
-Run migrations and spin up the server:
-```bash
+pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver
 ```
 
-### 3. Frontend Installation (React)
-Open a new terminal and navigate to the frontend folder:
-```bash
-cd frontend/HealthFrontend
-```
-Install NPM packages and launch the dev server:
-```bash
+### Frontend
+
+```powershell
+cd frontend\HealthFrontend
 npm install
 npm run dev
 ```
 
----
+The frontend development server uses `http://127.0.0.1:8000/api/` by default.
 
-## 🛡️ License
+## Deploy To Hugging Face Spaces
 
-Distributed under the MIT License. See `LICENSE` for more information.
+1. Create a new Hugging Face Space.
+2. Choose **Docker** as the Space SDK.
+3. Upload this repository, including `Dockerfile`, `backend/requirements.txt`, and the frontend files.
+4. Add a Space secret named `DJANGO_SECRET_KEY` with a strong random value.
+5. The container will build the React app, run Django migrations, and start Gunicorn on `$PORT`.
+
+The deployed app serves:
+
+- React frontend at `/`
+- Django admin at `/admin/`
+- API endpoints at `/api/`
+
+## Useful Docker Commands
+
+Build locally:
+
+```bash
+docker build -t healthtracker .
+```
+
+Run locally:
+
+```bash
+docker run --rm -p 7860:7860 -e DJANGO_SECRET_KEY=local-dev-secret healthtracker
+```
+
+Open:
+
+```text
+http://127.0.0.1:7860
+```
+
+## Environment Variables
+
+- `PORT`: server port. Hugging Face sets this automatically. Default: `7860`
+- `DJANGO_SECRET_KEY`: Django secret key. Set this in Hugging Face Space secrets.
+- `DJANGO_DEBUG`: set to `False` in Docker by default.
+- `DJANGO_ALLOWED_HOSTS`: comma-separated host list. Defaults to `*` in Docker.
+- `VITE_API_BASE_URL`: frontend API base URL at build time. Docker uses `/api/`.
+- `VITE_BASE_PATH`: frontend asset base path at build time. Docker uses `/static/`.
