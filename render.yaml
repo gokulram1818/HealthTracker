@@ -1,9 +1,9 @@
 services:
   - type: web
     name: healthtracker
-    runtime: docker
+    env: docker
     plan: free
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: Dockerfile
     envVars:
       - key: DJANGO_SECRET_KEY
         generateValue: true

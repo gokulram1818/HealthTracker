@@ -3,7 +3,7 @@ FROM node:22-slim AS frontend-build
 WORKDIR /app/frontend/HealthFrontend
 
 COPY frontend/HealthFrontend/package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY frontend/HealthFrontend/ ./
 ENV VITE_API_BASE_URL=/api/
@@ -32,4 +32,4 @@ RUN python manage.py collectstatic --noinput
 
 EXPOSE 7860
 
-CMD python manage.py migrate && gunicorn backend.wsgi:application --bind 0.0.0.0:${PORT}
+CMD ["sh", "-c", "python manage.py migrate && gunicorn backend.wsgi:application --bind 0.0.0.0:${PORT}"]
