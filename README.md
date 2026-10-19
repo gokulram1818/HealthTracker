@@ -87,7 +87,7 @@ In traditional community healthcare systems, citizen vaccination tracking and he
 | **Database** | SQLite 3 | Embedded database for development and single-container deployments |
 | **Notifications** | Django `EmailMultiAlternatives` | HTML and Plain Text SMTP email dispatch |
 | **Web Server** | Gunicorn 23, WhiteNoise 6 | Production WSGI HTTP Server with static asset handling |
-| **Containerization**| Docker (Multi-stage Node + Python) | Standardized container execution on Hugging Face / Render |
+| **Containerization**| Docker (Multi-stage Node + Python) | Standardized container execution on Render and other Docker-compatible platforms |
 
 ---
 
@@ -195,7 +195,7 @@ python manage.py test tracker
 
 ## 🐳 Containerization & Production Deployment
 
-### Option A: Docker Deployment (Local or Container Cloud)
+### Option A: Docker Deployment (Local)
 
 The project includes a multi-stage `Dockerfile` that builds the React application and bundles it directly with Gunicorn and Django WhiteNoise static asset serving.
 
@@ -212,21 +212,18 @@ The project includes a multi-stage `Dockerfile` that builds the React applicatio
 
 ---
 
-### Option B: Deploy to Hugging Face Spaces
+### Option B: Deploy to Render Web Services ⭐ (Recommended Free Option)
 
-1. Create a new Space on **Hugging Face**.
-2. Select **Docker** as the Space SDK.
-3. Push this repository to your Space.
-4. Add a Space secret named `DJANGO_SECRET_KEY` under **Settings -> Variables and secrets**.
-5. Hugging Face automatically builds the multi-stage container and exposes the app on port `7860`.
+1. Sign up / log in at **[render.com](https://render.com)** with your GitHub account.
+2. Click **New + → Web Service** and connect the `gokulram1818/HealthTracker` repository.
+3. Render automatically detects `render.yaml` and uses the `Dockerfile` to build the container.
+4. Add the required environment variables under **Settings → Environment**:
+   - `DJANGO_SECRET_KEY` — a securely generated random string
+   - `EMAIL_HOST_USER` — Gmail address (optional, enables email notifications)
+   - `EMAIL_HOST_PASSWORD` — Gmail App Password (optional)
+5. Click **Create Web Service** — the app is live in ~5 minutes.
 
----
-
-### Option C: Deploy to Render Web Services
-
-1. Connect your repository to **Render**.
-2. Render automatically detects `render.yaml`.
-3. The build process uses the `Dockerfile` specification to construct and deploy the container.
+> **Free Tier Note**: Render's free plan spins down after 15 minutes of inactivity. The first request after sleep takes ~30 seconds to wake up.
 
 ---
 
@@ -234,14 +231,15 @@ The project includes a multi-stage `Dockerfile` that builds the React applicatio
 
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `PORT` | `7860` | Server binding port (set automatically in Docker/HuggingFace) |
-| `DJANGO_SECRET_KEY` | *Generated* | Cryptographic secret for session signing and tokens |
+| `PORT` | `7860` | Server binding port (set automatically in Docker) |
+| `DJANGO_SECRET_KEY` | *Insecure default* | **Must be overridden in production** — cryptographic secret for session signing and tokens |
 | `DJANGO_DEBUG` | `False` | Enable/Disable Django debug mode |
 | `DJANGO_ALLOWED_HOSTS` | `*` | Comma-separated allowed host headers |
 | `VITE_API_BASE_URL` | `/api/` | Frontend API base route used during Vite compilation |
 | `VITE_BASE_PATH` | `/static/` | Frontend static asset path used during Vite compilation |
-| `EMAIL_HOST_USER` | `""` | SMTP Username for sending notification emails |
-| `EMAIL_HOST_PASSWORD` | `""` | SMTP App Password for sending notification emails |
+| `EMAIL_HOST_USER` | `""` | Gmail address for SMTP email dispatch. If not set, falls back to console backend (emails print to logs). |
+| `EMAIL_HOST_PASSWORD` | `""` | Gmail App Password — generate via Google Account → Security → App Passwords |
+| `EMAIL_BACKEND` | *Auto-detected* | Overrides email backend. Automatically uses `console` backend when `EMAIL_HOST_USER` is empty |
 
 ---
 
