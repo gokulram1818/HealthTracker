@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, generics, status
+from rest_framework import viewsets, permissions, generics, status, serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -45,7 +45,37 @@ class IsAdminOrHealthWorkerForCitizens(permissions.BasePermission):
 
 # Custom JWT Authentication Views
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    username_field = 'email'
+
     def validate(self, attrs):
+        # Extract email and password from attrs or initial_data (supporting 'email' or 'username' keys)
+        raw_email = attrs.get('email') or attrs.get('username') or self.initial_data.get('email') or self.initial_data.get('username')
+        password = attrs.get('password') or self.initial_data.get('password')
+
+        if not raw_email or not password:
+            raise serializers.ValidationError({"detail": "Both email and password are required."})
+
+        email_clean = str(raw_email).strip().lower()
+
+        # Perform case-insensitive user lookup
+        user = CustomUser.objects.filter(
+            models.Q(email__iexact=email_clean) | models.Q(username__iexact=email_clean)
+        ).first()
+
+        if not user:
+            raise serializers.ValidationError({"detail": "No account registered with this email address. Please sign up or check your email."})
+
+        if not user.is_active:
+            raise serializers.ValidationError({"detail": "This account is inactive. Please contact system support."})
+
+        if not user.has_usable_password() or not user.check_password(password):
+            raise serializers.ValidationError({"detail": "Incorrect password. Please verify your password and try again."})
+
+        # Inject cleaned email and password for parent serializer validation & token generation
+        attrs[self.username_field] = user.email
+        attrs['password'] = password
+        self.user = user
+
         data = super().validate(attrs)
         data['user'] = {
             'id': self.user.id,
@@ -289,14 +319,20 @@ class UserViewSet(viewsets.ModelViewSet):
         ).order_by('name')
 
     def perform_create(self, serializer):
+        raw_password = self.request.data.get('password')
+        email = serializer.validated_data.get('email', '').strip().lower()
         if self.request.user.role == 'health_worker':
-            # Create a private citizen user with unusable password
+            # Create a private citizen user
             user = serializer.save(
                 role='citizen', 
                 created_by=self.request.user,
-                username=serializer.validated_data.get('email')
+                email=email,
+                username=email
             )
-            user.set_unusable_password()
+            if raw_password:
+                user.set_password(raw_password)
+            else:
+                user.set_unusable_password()
             user.save()
             
             # Auto-create HealthRecord
@@ -306,8 +342,11 @@ class UserViewSet(viewsets.ModelViewSet):
             )
         else:
             # Admin flow
-            user = serializer.save(username=serializer.validated_data.get('email'))
-            user.set_unusable_password()
+            user = serializer.save(email=email, username=email)
+            if raw_password:
+                user.set_password(raw_password)
+            else:
+                user.set_unusable_password()
             user.save()
             if user.role == 'citizen':
                 HealthRecord.objects.get_or_create(

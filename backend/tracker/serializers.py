@@ -16,13 +16,15 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'email', 'password', 'role']
 
     def validate_email(self, value):
-        if CustomUser.objects.filter(email=value).exists():
+        email_clean = value.strip().lower()
+        if CustomUser.objects.filter(email__iexact=email_clean).exists():
             raise serializers.ValidationError("A user with this email already exists.")
-        return value
+        return email_clean
 
     def create(self, validated_data):
+        email_clean = validated_data['email'].strip().lower()
         user = CustomUser.objects.create_user(
-            email=validated_data['email'],
+            email=email_clean,
             name=validated_data.get('name', ''),
             password=validated_data['password'],
             role=validated_data.get('role', 'citizen')

@@ -76,17 +76,18 @@ const LoginRegister = () => {
     
     if (!validateForm()) return;
     
+    const cleanEmail = email.trim().toLowerCase();
     setLoading(true);
     try {
       if (isRegister) {
-        await register(name, email, password, role);
+        await register(name.trim(), cleanEmail, password, role);
         setSuccess('Account created successfully! You can now log in.');
         setIsRegister(false);
         // Clear fields
         setPassword('');
         setConfirmPassword('');
       } else {
-        const loggedInUser = await login(email, password);
+        const loggedInUser = await login(cleanEmail, password);
         setSuccess(`Logged in successfully as ${loggedInUser.name || loggedInUser.email}`);
         
         // Navigation is handled by the useEffect redirecting based on role
