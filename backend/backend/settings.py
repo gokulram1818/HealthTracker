@@ -164,18 +164,19 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
 }
 
-# Email settings (Gmail SMTP Configuration)
-# Fall back to console backend if no SMTP credentials are provided (safe for production — prints to stdout)
-_email_host_user = os.environ.get('EMAIL_HOST_USER', '')
-EMAIL_BACKEND = os.environ.get(
-    'EMAIL_BACKEND',
-    'django.core.mail.backends.smtp.EmailBackend' if _email_host_user else 'django.core.mail.backends.console.EmailBackend'
-)
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp4.gmail.com')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
-EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() == 'true'
-EMAIL_HOST_USER = _email_host_user
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+# Email settings
+# Uses Resend (via django-anymail) in production — works over HTTPS, never blocked by Render.
+# Falls back to console backend locally when RESEND_API_KEY is not set.
+_resend_api_key = os.environ.get('RESEND_API_KEY', '')
 
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', f'Health Tracker <{EMAIL_HOST_USER}>')
+if _resend_api_key:
+    EMAIL_BACKEND = 'anymail.backends.resend.EmailBackend'
+    ANYMAIL = {
+        'RESEND_API_KEY': _resend_api_key,
+    }
+    DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Health Tracker <onboarding@resend.dev>')
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    DEFAULT_FROM_EMAIL = 'Health Tracker <noreply@healthtracker.local>'
 
+INSTALLED_APPS += ['anymail']
